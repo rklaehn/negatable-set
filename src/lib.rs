@@ -10,13 +10,13 @@ use serde::{
     de::{Deserialize, Deserializer},
     ser::{Serialize, Serializer},
 };
-#[cfg(feature = "vec-collections")]
+#[cfg(feature = "vc")]
 use smallvec::Array;
 use std::{
     collections::{BTreeSet, HashSet},
     hash::BuildHasher,
 };
-#[cfg(feature = "vec-collections")]
+#[cfg(feature = "vc")]
 use vec_collections::VecSet;
 #[cfg(test)]
 #[macro_use]
@@ -142,7 +142,7 @@ pub trait MutableSet {
     fn is_disjoint(&self, rhs: &Self) -> bool;
 }
 
-#[cfg(feature = "vec-collections")]
+#[cfg(feature = "vc")]
 impl<T: Ord + Debug + 'static, A: Array<Item = T>> MutableSet for VecSet<A> {
     type Item = T;
 
@@ -513,7 +513,6 @@ impl<I: MutableSet + Clone> Not for NegatableSet<I> {
 }
 
 #[cfg(test)]
-#[cfg(feature = "vec-collections")]
 mod tests {
     #[allow(dead_code)]
     use super::*;
@@ -521,14 +520,25 @@ mod tests {
     use quickcheck_macros::quickcheck;
     use vec_collections::VecSet;
 
+    #[cfg(feature = "vc")]
     type Test = NegatableSet<VecSet<[i64; 4]>>;
 
+    #[cfg(feature = "vc")]
     impl<T: Arbitrary + Ord + Copy + Default + Debug> Arbitrary for NegatableSet<VecSet<[T; 4]>> {
         fn arbitrary<G: Gen>(g: &mut G) -> Self {
             let mut elements: Vec<T> = Arbitrary::arbitrary(g);
             elements.truncate(2);
             let negated: bool = Arbitrary::arbitrary(g);
             NegatableSet::new(elements.into(), negated)
+        }
+    }
+
+    impl<T: Arbitrary + Ord + Copy + Default + Debug> Arbitrary for NegatableSet<BTreeSet<T>> {
+        fn arbitrary<G: Gen>(g: &mut G) -> Self {
+            let mut elements: Vec<T> = Arbitrary::arbitrary(g);
+            elements.truncate(2);
+            let negated: bool = Arbitrary::arbitrary(g);
+            NegatableSet::new(elements.into_iter().collect(), negated)
         }
     }
 
@@ -542,6 +552,7 @@ mod tests {
         res
     }
 
+    #[cfg(feature = "vc")]
     fn binary_op(a: &Test, b: &Test, r: &Test, op: impl Fn(bool, bool) -> bool) -> bool {
         let mut samples: BTreeSet<i64> = BTreeSet::new();
         samples.extend(a.elements.iter().cloned());
@@ -560,6 +571,7 @@ mod tests {
         })
     }
 
+    #[cfg(feature = "vc")]
     fn binary_property(a: &Test, b: &Test, r: bool, op: impl Fn(bool, bool) -> bool) -> bool {
         let mut samples: BTreeSet<i64> = BTreeSet::new();
         samples.extend(a.elements.iter().cloned());
@@ -584,39 +596,52 @@ mod tests {
     quickcheck::quickcheck! {
 
         #[cfg(feature = "serde")]
-        fn serde_roundtrip(reference: Test) -> bool {
+        fn serde_roundtrip(reference: NegatableSet<BTreeSet<u64>>) -> bool {
             let bytes = serde_json::to_vec(&reference).unwrap();
             let deser = serde_json::from_slice(&bytes).unwrap();
             reference == deser
         }
 
+        #[cfg(feature = "vc")]
         fn is_disjoint_sample(a: Test, b: Test) -> bool {
             binary_property(&a, &b, a.is_disjoint(&b), |a, b| !(a & b))
         }
 
+        #[cfg(feature = "vc")]
         fn is_subset_sample(a: Test, b: Test) -> bool {
             binary_property(&a, &b, a.is_subset(&b), |a, b| !a | b)
         }
 
+        #[cfg(feature = "vc")]
         fn union_sample(a: Test, b: Test) -> bool {
             binary_op(&a, &b, &(&a | &b), |a, b| a | b)
         }
 
+        #[cfg(feature = "vc")]
         fn intersection_sample(a: Test, b: Test) -> bool {
             binary_op(&a, &b, &(&a & &b), |a, b| a & b)
         }
 
+        #[cfg(feature = "vc")]
         fn xor_sample(a: Test, b: Test) -> bool {
             binary_op(&a, &b, &(&a ^ &b), |a, b| a ^ b)
         }
 
+        #[cfg(feature = "vc")]
         fn diff_sample(a: Test, b: Test) -> bool {
             binary_op(&a, &b, &(&a - &b), |a, b| a & !b)
         }
     }
 
+    #[cfg(feature = "vc")]
     bitop_assign_consistent!(Test);
+
+    #[cfg(feature = "vc")]
     bitop_symmetry!(Test);
+
+    #[cfg(feature = "vc")]
     bitop_empty!(Test);
+
+    #[cfg(feature = "vc")]
     bitop_sub_not_all!(Test);
 }
