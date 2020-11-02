@@ -17,20 +17,16 @@ use vec_collections::VecSet;
 #[macro_use]
 mod test_macros;
 
-/// A [VecSet] with an additional flag so it can support negation.
-///
-/// This way it is possible to represent e.g. the set of all u64 except 1.
-///
-/// [VecSet]: struct.VecSet.html
-pub struct TotalSet<I> {
+#[derive(Default)]
+pub struct NegatableSet<I> {
     elements: I,
     negated: bool,
 }
 
 #[cfg(feature = "serde")]
-impl<A: Array> Serialize for TotalSet<A>
+impl<A> Serialize for NegatableSet<A>
 where
-    A::Item: Serialize,
+    A: MutableSet + Serialize,
 {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         (&self.elements, &self.negated).serialize(serializer)
@@ -38,17 +34,17 @@ where
 }
 
 #[cfg(feature = "serde")]
-impl<'de, A: Array> Deserialize<'de> for TotalSet<A>
+impl<'de, A> Deserialize<'de> for NegatableSet<A>
 where
-    A::Item: Deserialize<'de> + Ord + PartialEq + Clone,
+    A: MutableSet + Deserialize<'de>,
 {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let (elements, negated) = <(VecSet<A>, bool)>::deserialize(deserializer)?;
+        let (elements, negated) = <(A, bool)>::deserialize(deserializer)?;
         Ok(Self::new(elements, negated))
     }
 }
 
-impl<I: Clone> Clone for TotalSet<I> {
+impl<I: Clone> Clone for NegatableSet<I> {
     fn clone(&self) -> Self {
         Self {
             elements: self.elements.clone(),
@@ -57,22 +53,22 @@ impl<I: Clone> Clone for TotalSet<I> {
     }
 }
 
-impl<I: Hash> Hash for TotalSet<I> {
+impl<I: Hash> Hash for NegatableSet<I> {
     fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
         self.elements.hash(state);
         self.negated.hash(state);
     }
 }
 
-impl<I: PartialEq> PartialEq for TotalSet<I> {
+impl<I: PartialEq> PartialEq for NegatableSet<I> {
     fn eq(&self, other: &Self) -> bool {
         self.elements == other.elements && self.negated == other.negated
     }
 }
 
-impl<I: Eq> Eq for TotalSet<I> {}
+impl<I: Eq> Eq for NegatableSet<I> {}
 
-impl<I: MutableSet> Debug for TotalSet<I> {
+impl<I: MutableSet> Debug for NegatableSet<I> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.negated {
             f.write_char('!')?;
@@ -81,7 +77,23 @@ impl<I: MutableSet> Debug for TotalSet<I> {
     }
 }
 
-impl<I: MutableSet> TotalSet<I> {
+impl<I: MutableSet + Default> NegatableSet<I> {
+
+    pub fn constant(value: bool) -> Self {
+        Self::new(I::default(), value)
+    }
+
+    pub fn empty() -> Self {
+        false.into()
+    }
+
+    pub fn all() -> Self {
+        true.into()
+    }
+}
+
+impl<I: MutableSet> NegatableSet<I> {
+
     fn new(elements: I, negated: bool) -> Self {
         Self { elements, negated }
     }
@@ -94,20 +106,16 @@ impl<I: MutableSet> TotalSet<I> {
         self.negated && self.elements.is_empty()
     }
 
-    pub fn constant(value: bool) -> Self {
-        Self::new(I::empty(), value)
+    pub fn into_elements(self) -> I {
+        self.elements
     }
 
-    pub fn empty() -> Self {
-        false.into()
+    pub fn elements(&self) -> &I {
+        &self.elements
     }
 
-    pub fn all() -> Self {
-        true.into()
-    }
-
-    pub fn shrink_to_fit(&mut self) {
-        self.elements.shrink_to_fit()
+    pub fn elements_mut(&mut self) -> &mut I {
+        &mut self.elements
     }
 }
 
@@ -117,10 +125,6 @@ pub trait MutableSet {
     fn iter<'a>(&'a self) -> Box<dyn Iterator<Item = &'a Self::Item> + 'a>;
 
     fn is_empty(&self) -> bool;
-
-    fn empty() -> Self;
-
-    fn shrink_to_fit(&mut self);
 
     fn contains(&self, value: &Self::Item) -> bool;
 
@@ -144,14 +148,6 @@ impl<T: Ord + Debug + 'static, A: Array<Item = T>> MutableSet for VecSet<A> {
 
     fn is_empty(&self) -> bool {
         VecSet::is_empty(self)
-    }
-
-    fn empty() -> Self {
-        VecSet::empty()
-    }
-
-    fn shrink_to_fit(&mut self) {
-        VecSet::shrink_to_fit(self);
     }
 
     fn contains(&self, value: &Self::Item) -> bool {
@@ -190,12 +186,6 @@ impl<T: Ord + Debug + 'static> MutableSet for BTreeSet<T> {
         BTreeSet::is_empty(self)
     }
 
-    fn empty() -> Self {
-        BTreeSet::new()
-    }
-
-    fn shrink_to_fit(&mut self) {}
-
     fn contains(&self, value: &Self::Item) -> bool {
         BTreeSet::contains(self, value)
     }
@@ -232,14 +222,6 @@ impl<T: Hash + Eq + Debug + 'static, S: BuildHasher + Default> MutableSet for Ha
         HashSet::is_empty(self)
     }
 
-    fn empty() -> Self {
-        HashSet::default()
-    }
-
-    fn shrink_to_fit(&mut self) {
-        HashSet::shrink_to_fit(self)
-    }
-
     fn contains(&self, value: &Self::Item) -> bool {
         HashSet::contains(self, value)
     }
@@ -265,19 +247,19 @@ impl<T: Hash + Eq + Debug + 'static, S: BuildHasher + Default> MutableSet for Ha
     }
 }
 
-impl<I: MutableSet> From<bool> for TotalSet<I> {
+impl<I: MutableSet + Default> From<bool> for NegatableSet<I> {
     fn from(value: bool) -> Self {
         Self::constant(value)
     }
 }
 
-impl<I: MutableSet> From<I> for TotalSet<I> {
+impl<I: MutableSet> From<I> for NegatableSet<I> {
     fn from(value: I) -> Self {
         Self::new(value, false)
     }
 }
 
-impl<I: MutableSet> TotalSet<I> {
+impl<I: MutableSet> NegatableSet<I> {
     pub fn contains(&self, value: &I::Item) -> bool {
         self.negated ^ self.elements.contains(value)
     }
@@ -313,7 +295,7 @@ impl<I: MutableSet> TotalSet<I> {
     }
 }
 
-impl<I: MutableSet> TotalSet<I>
+impl<I: MutableSet> NegatableSet<I>
 where
     I::Item: Ord + Clone,
 {
@@ -326,13 +308,13 @@ where
     }
 }
 
-impl<'a, I: MutableSet + 'a> BitAnd for &'a TotalSet<I>
+impl<'a, I: MutableSet + 'a> BitAnd for &'a NegatableSet<I>
 where
     &'a I: BitAnd<Output = I>,
     &'a I: BitOr<Output = I>,
     &'a I: Sub<Output = I>,
 {
-    type Output = TotalSet<I>;
+    type Output = NegatableSet<I>;
     fn bitand(self, that: Self) -> Self::Output {
         match (self.negated, that.negated) {
             // intersection of elements
@@ -347,7 +329,7 @@ where
     }
 }
 
-impl<I: MutableSet> BitAndAssign for TotalSet<I>
+impl<I: MutableSet> BitAndAssign for NegatableSet<I>
 where
     I: BitAndAssign,
     I: BitOrAssign,
@@ -381,13 +363,13 @@ where
     }
 }
 
-impl<'a, I: MutableSet> BitOr for &'a TotalSet<I>
+impl<'a, I: MutableSet> BitOr for &'a NegatableSet<I>
 where
     &'a I: BitAnd<Output = I>,
     &'a I: BitOr<Output = I>,
     &'a I: Sub<Output = I>,
 {
-    type Output = TotalSet<I>;
+    type Output = NegatableSet<I>;
     fn bitor(self, that: Self) -> Self::Output {
         match (self.negated, that.negated) {
             // union of elements
@@ -402,7 +384,7 @@ where
     }
 }
 
-impl<I: MutableSet> BitOrAssign for TotalSet<I>
+impl<I: MutableSet> BitOrAssign for NegatableSet<I>
 where
     I: BitAndAssign,
     I: BitOrAssign,
@@ -436,17 +418,17 @@ where
     }
 }
 
-impl<'a, I: MutableSet> BitXor for &'a TotalSet<I>
+impl<'a, I: MutableSet> BitXor for &'a NegatableSet<I>
 where
     &'a I: BitXor<Output = I>,
 {
-    type Output = TotalSet<I>;
+    type Output = NegatableSet<I>;
     fn bitxor(self, that: Self) -> Self::Output {
         Self::Output::new(&self.elements ^ &that.elements, self.negated ^ that.negated)
     }
 }
 
-impl<I: MutableSet> BitXorAssign for TotalSet<I>
+impl<I: MutableSet> BitXorAssign for NegatableSet<I>
 where
     I: BitXorAssign,
 {
@@ -457,13 +439,13 @@ where
 }
 
 #[allow(clippy::suspicious_arithmetic_impl)]
-impl<'a, I: MutableSet> Sub for &'a TotalSet<I>
+impl<'a, I: MutableSet> Sub for &'a NegatableSet<I>
 where
     &'a I: BitAnd<Output = I>,
     &'a I: BitOr<Output = I>,
     &'a I: Sub<Output = I>,
 {
-    type Output = TotalSet<I>;
+    type Output = NegatableSet<I>;
     fn sub(self, that: Self) -> Self::Output {
         match (self.negated, that.negated) {
             // intersection of elements
@@ -478,7 +460,7 @@ where
     }
 }
 
-impl<I: MutableSet> SubAssign for TotalSet<I>
+impl<I: MutableSet> SubAssign for NegatableSet<I>
 where
     I: BitAndAssign,
     I: BitOrAssign,
@@ -512,15 +494,15 @@ where
     }
 }
 
-impl<'a, I: MutableSet + Clone> Not for &'a TotalSet<I> {
-    type Output = TotalSet<I>;
+impl<'a, I: MutableSet + Clone> Not for &'a NegatableSet<I> {
+    type Output = NegatableSet<I>;
     fn not(self) -> Self::Output {
         Self::Output::new(self.elements.clone(), !self.negated)
     }
 }
 
-impl<I: MutableSet + Clone> Not for TotalSet<I> {
-    type Output = TotalSet<I>;
+impl<I: MutableSet + Clone> Not for NegatableSet<I> {
+    type Output = NegatableSet<I>;
     fn not(self) -> Self::Output {
         Self::Output::new(self.elements, !self.negated)
     }
@@ -534,14 +516,14 @@ mod tests {
     use quickcheck_macros::quickcheck;
     use std::collections::BTreeSet;
 
-    type Test = TotalSet<VecSet<[i64; 2]>>;
+    type Test = NegatableSet<VecSet<[i64; 2]>>;
 
-    impl<T: Arbitrary + Ord + Copy + Default + Debug> Arbitrary for TotalSet<VecSet<[T; 2]>> {
+    impl<T: Arbitrary + Ord + Copy + Default + Debug> Arbitrary for NegatableSet<VecSet<[T; 2]>> {
         fn arbitrary<G: Gen>(g: &mut G) -> Self {
             let mut elements: Vec<T> = Arbitrary::arbitrary(g);
             elements.truncate(2);
             let negated: bool = Arbitrary::arbitrary(g);
-            TotalSet::new(elements.into(), negated)
+            NegatableSet::new(elements.into(), negated)
         }
     }
 
