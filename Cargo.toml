@@ -7,12 +7,19 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 default = ["serde"]
+vec-collections = ["vec-collections", "smallvec"]
 
-[dependencies]
-vec-collections = "0.3.3"
-smallvec = "1.4.2"
+[dependencies.vec-collections]
+default-features = false
+optional = true
+version = "0.3.3"
 
 [dependencies.serde]
+default-features = false
+optional = true
+version = "1"
+
+[dependencies.smallvec]
 default-features = false
 optional = true
 version = "1"
@@ -22,3 +29,4 @@ quickcheck = "0.9.2"
 quickcheck_macros = "0.9.1"
 maplit = "1.0.2"
 serde_json = "1.0.59"
+vec-collections = "0.3.3"

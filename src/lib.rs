@@ -10,8 +10,13 @@ use serde::{
     de::{Deserialize, Deserializer},
     ser::{Serialize, Serializer},
 };
+#[cfg(feature = "vec-collections")]
 use smallvec::Array;
-use std::{hash::BuildHasher, collections::{BTreeSet, HashSet}};
+use std::{
+    collections::{BTreeSet, HashSet},
+    hash::BuildHasher,
+};
+#[cfg(feature = "vec-collections")]
 use vec_collections::VecSet;
 #[cfg(test)]
 #[macro_use]
@@ -78,7 +83,6 @@ impl<I: MutableSet> Debug for NegatableSet<I> {
 }
 
 impl<I: MutableSet + Default> NegatableSet<I> {
-
     pub fn constant(value: bool) -> Self {
         Self::new(I::default(), value)
     }
@@ -93,7 +97,6 @@ impl<I: MutableSet + Default> NegatableSet<I> {
 }
 
 impl<I: MutableSet> NegatableSet<I> {
-
     fn new(elements: I, negated: bool) -> Self {
         Self { elements, negated }
     }
@@ -139,6 +142,7 @@ pub trait MutableSet {
     fn is_disjoint(&self, rhs: &Self) -> bool;
 }
 
+#[cfg(feature = "vec-collections")]
 impl<T: Ord + Debug + 'static, A: Array<Item = T>> MutableSet for VecSet<A> {
     type Item = T;
 
@@ -509,16 +513,17 @@ impl<I: MutableSet + Clone> Not for NegatableSet<I> {
 }
 
 #[cfg(test)]
+#[cfg(feature = "vec-collections")]
 mod tests {
     #[allow(dead_code)]
     use super::*;
     use quickcheck::*;
     use quickcheck_macros::quickcheck;
-    use std::collections::BTreeSet;
+    use vec_collections::VecSet;
 
-    type Test = NegatableSet<VecSet<[i64; 2]>>;
+    type Test = NegatableSet<VecSet<[i64; 4]>>;
 
-    impl<T: Arbitrary + Ord + Copy + Default + Debug> Arbitrary for NegatableSet<VecSet<[T; 2]>> {
+    impl<T: Arbitrary + Ord + Copy + Default + Debug> Arbitrary for NegatableSet<VecSet<[T; 4]>> {
         fn arbitrary<G: Gen>(g: &mut G) -> Self {
             let mut elements: Vec<T> = Arbitrary::arbitrary(g);
             elements.truncate(2);
@@ -539,8 +544,8 @@ mod tests {
 
     fn binary_op(a: &Test, b: &Test, r: &Test, op: impl Fn(bool, bool) -> bool) -> bool {
         let mut samples: BTreeSet<i64> = BTreeSet::new();
-        samples.extend(a.elements.as_ref().iter().cloned());
-        samples.extend(b.elements.as_ref().iter().cloned());
+        samples.extend(a.elements.iter().cloned());
+        samples.extend(b.elements.iter().cloned());
         samples.insert(core::i64::MIN);
         samples.iter().all(|e| {
             let expected = op(a.contains(e), b.contains(e));
@@ -557,8 +562,8 @@ mod tests {
 
     fn binary_property(a: &Test, b: &Test, r: bool, op: impl Fn(bool, bool) -> bool) -> bool {
         let mut samples: BTreeSet<i64> = BTreeSet::new();
-        samples.extend(a.elements.as_ref().iter().cloned());
-        samples.extend(b.elements.as_ref().iter().cloned());
+        samples.extend(a.elements.iter().cloned());
+        samples.extend(b.elements.iter().cloned());
         samples.insert(core::i64::MIN);
         if r {
             samples.iter().all(|e| {

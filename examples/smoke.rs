@@ -1,6 +1,6 @@
+use maplit::btreeset;
 use negatable_set::NegatableSet;
 use std::collections::BTreeSet;
-use maplit::btreeset;
 
 type Test = NegatableSet<BTreeSet<u64>>;
 
