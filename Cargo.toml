@@ -1,5 +1,5 @@
 [package]
-name = "total-set"
+name = "negatable-set"
 version = "0.1.0"
 authors = ["Rüdiger Klaehn <rklaehn@protonmail.com>"]
 edition = "2018"

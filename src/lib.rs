@@ -11,6 +11,7 @@ use serde::{
     ser::{Serialize, Serializer},
 };
 use smallvec::Array;
+use std::{hash::BuildHasher, collections::{BTreeSet, HashSet}};
 use vec_collections::VecSet;
 #[cfg(test)]
 #[macro_use]
@@ -21,16 +22,13 @@ mod test_macros;
 /// This way it is possible to represent e.g. the set of all u64 except 1.
 ///
 /// [VecSet]: struct.VecSet.html
-pub struct TotalVecSet<A: Array> {
-    elements: VecSet<A>,
+pub struct TotalSet<I> {
+    elements: I,
     negated: bool,
 }
 
-/// Type alias for a [TotalVecSet](struct.TotalVecSet) with up to 2 elements with inline storage.
-pub type TotalVecSet2<T> = TotalVecSet<[T; 2]>;
-
 #[cfg(feature = "serde")]
-impl<A: Array> Serialize for TotalVecSet<A>
+impl<A: Array> Serialize for TotalSet<A>
 where
     A::Item: Serialize,
 {
@@ -40,7 +38,7 @@ where
 }
 
 #[cfg(feature = "serde")]
-impl<'de, A: Array> Deserialize<'de> for TotalVecSet<A>
+impl<'de, A: Array> Deserialize<'de> for TotalSet<A>
 where
     A::Item: Deserialize<'de> + Ord + PartialEq + Clone,
 {
@@ -50,7 +48,7 @@ where
     }
 }
 
-impl<T: Clone, A: Array<Item = T>> Clone for TotalVecSet<A> {
+impl<I: Clone> Clone for TotalSet<I> {
     fn clone(&self) -> Self {
         Self {
             elements: self.elements.clone(),
@@ -59,22 +57,22 @@ impl<T: Clone, A: Array<Item = T>> Clone for TotalVecSet<A> {
     }
 }
 
-impl<T: Hash, A: Array<Item = T>> Hash for TotalVecSet<A> {
+impl<I: Hash> Hash for TotalSet<I> {
     fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
         self.elements.hash(state);
         self.negated.hash(state);
     }
 }
 
-impl<T: PartialEq, A: Array<Item = T>> PartialEq for TotalVecSet<A> {
+impl<I: PartialEq> PartialEq for TotalSet<I> {
     fn eq(&self, other: &Self) -> bool {
         self.elements == other.elements && self.negated == other.negated
     }
 }
 
-impl<T: Eq, A: Array<Item = T>> Eq for TotalVecSet<A> {}
+impl<I: Eq> Eq for TotalSet<I> {}
 
-impl<T: Debug, A: Array<Item = T>> Debug for TotalVecSet<A> {
+impl<I: MutableSet> Debug for TotalSet<I> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.negated {
             f.write_char('!')?;
@@ -83,8 +81,8 @@ impl<T: Debug, A: Array<Item = T>> Debug for TotalVecSet<A> {
     }
 }
 
-impl<T, A: Array<Item = T>> TotalVecSet<A> {
-    fn new(elements: VecSet<A>, negated: bool) -> Self {
+impl<I: MutableSet> TotalSet<I> {
+    fn new(elements: I, negated: bool) -> Self {
         Self { elements, negated }
     }
 
@@ -97,7 +95,7 @@ impl<T, A: Array<Item = T>> TotalVecSet<A> {
     }
 
     pub fn constant(value: bool) -> Self {
-        Self::new(VecSet::empty(), value)
+        Self::new(I::empty(), value)
     }
 
     pub fn empty() -> Self {
@@ -113,24 +111,178 @@ impl<T, A: Array<Item = T>> TotalVecSet<A> {
     }
 }
 
-impl<T, A: Array<Item = T>> From<bool> for TotalVecSet<A> {
+pub trait MutableSet {
+    type Item: Debug + 'static;
+
+    fn iter<'a>(&'a self) -> Box<dyn Iterator<Item = &'a Self::Item> + 'a>;
+
+    fn is_empty(&self) -> bool;
+
+    fn empty() -> Self;
+
+    fn shrink_to_fit(&mut self);
+
+    fn contains(&self, value: &Self::Item) -> bool;
+
+    fn insert(&mut self, value: Self::Item);
+
+    fn remove(&mut self, value: &Self::Item);
+
+    fn is_subset(&self, rhs: &Self) -> bool;
+
+    fn is_superset(&self, rhs: &Self) -> bool;
+
+    fn is_disjoint(&self, rhs: &Self) -> bool;
+}
+
+impl<T: Ord + Debug + 'static, A: Array<Item = T>> MutableSet for VecSet<A> {
+    type Item = T;
+
+    fn iter<'a>(&'a self) -> Box<dyn Iterator<Item = &'a Self::Item> + 'a> {
+        Box::new(VecSet::iter(self))
+    }
+
+    fn is_empty(&self) -> bool {
+        VecSet::is_empty(self)
+    }
+
+    fn empty() -> Self {
+        VecSet::empty()
+    }
+
+    fn shrink_to_fit(&mut self) {
+        VecSet::shrink_to_fit(self);
+    }
+
+    fn contains(&self, value: &Self::Item) -> bool {
+        VecSet::contains(self, value)
+    }
+
+    fn insert(&mut self, value: Self::Item) {
+        VecSet::insert(self, value)
+    }
+
+    fn remove(&mut self, value: &Self::Item) {
+        VecSet::remove(self, value)
+    }
+
+    fn is_subset(&self, rhs: &Self) -> bool {
+        VecSet::is_subset(self, rhs)
+    }
+
+    fn is_superset(&self, rhs: &Self) -> bool {
+        VecSet::is_superset(self, rhs)
+    }
+
+    fn is_disjoint(&self, rhs: &Self) -> bool {
+        VecSet::is_disjoint(self, rhs)
+    }
+}
+
+impl<T: Ord + Debug + 'static> MutableSet for BTreeSet<T> {
+    type Item = T;
+
+    fn iter<'a>(&'a self) -> Box<dyn Iterator<Item = &'a Self::Item> + 'a> {
+        Box::new(BTreeSet::iter(self))
+    }
+
+    fn is_empty(&self) -> bool {
+        BTreeSet::is_empty(self)
+    }
+
+    fn empty() -> Self {
+        BTreeSet::new()
+    }
+
+    fn shrink_to_fit(&mut self) {}
+
+    fn contains(&self, value: &Self::Item) -> bool {
+        BTreeSet::contains(self, value)
+    }
+
+    fn insert(&mut self, value: Self::Item) {
+        BTreeSet::insert(self, value);
+    }
+
+    fn remove(&mut self, value: &Self::Item) {
+        BTreeSet::remove(self, value);
+    }
+
+    fn is_subset(&self, rhs: &Self) -> bool {
+        BTreeSet::is_subset(self, rhs)
+    }
+
+    fn is_superset(&self, rhs: &Self) -> bool {
+        BTreeSet::is_superset(self, rhs)
+    }
+
+    fn is_disjoint(&self, rhs: &Self) -> bool {
+        BTreeSet::is_disjoint(self, rhs)
+    }
+}
+
+impl<T: Hash + Eq + Debug + 'static, S: BuildHasher + Default> MutableSet for HashSet<T, S> {
+    type Item = T;
+
+    fn iter<'a>(&'a self) -> Box<dyn Iterator<Item = &'a Self::Item> + 'a> {
+        Box::new(HashSet::iter(self))
+    }
+
+    fn is_empty(&self) -> bool {
+        HashSet::is_empty(self)
+    }
+
+    fn empty() -> Self {
+        HashSet::default()
+    }
+
+    fn shrink_to_fit(&mut self) {
+        HashSet::shrink_to_fit(self)
+    }
+
+    fn contains(&self, value: &Self::Item) -> bool {
+        HashSet::contains(self, value)
+    }
+
+    fn insert(&mut self, value: Self::Item) {
+        HashSet::insert(self, value);
+    }
+
+    fn remove(&mut self, value: &Self::Item) {
+        HashSet::remove(self, value);
+    }
+
+    fn is_subset(&self, rhs: &Self) -> bool {
+        HashSet::is_subset(self, rhs)
+    }
+
+    fn is_superset(&self, rhs: &Self) -> bool {
+        HashSet::is_superset(self, rhs)
+    }
+
+    fn is_disjoint(&self, rhs: &Self) -> bool {
+        HashSet::is_disjoint(self, rhs)
+    }
+}
+
+impl<I: MutableSet> From<bool> for TotalSet<I> {
     fn from(value: bool) -> Self {
         Self::constant(value)
     }
 }
 
-impl<T, A: Array<Item = T>> From<VecSet<A>> for TotalVecSet<A> {
-    fn from(value: VecSet<A>) -> Self {
+impl<I: MutableSet> From<I> for TotalSet<I> {
+    fn from(value: I) -> Self {
         Self::new(value, false)
     }
 }
 
-impl<T: Ord, A: Array<Item = T>> TotalVecSet<A> {
-    pub fn contains(&self, value: &T) -> bool {
+impl<I: MutableSet> TotalSet<I> {
+    pub fn contains(&self, value: &I::Item) -> bool {
         self.negated ^ self.elements.contains(value)
     }
 
-    pub fn insert(&mut self, that: T) {
+    pub fn insert(&mut self, that: I::Item) {
         if !self.negated {
             self.elements.insert(that)
         } else {
@@ -161,8 +313,11 @@ impl<T: Ord, A: Array<Item = T>> TotalVecSet<A> {
     }
 }
 
-impl<T: Ord + Clone, A: Array<Item = T>> TotalVecSet<A> {
-    pub fn remove(&mut self, that: &T) {
+impl<I: MutableSet> TotalSet<I>
+where
+    I::Item: Ord + Clone,
+{
+    pub fn remove(&mut self, that: &I::Item) {
         if self.negated {
             self.elements.insert(that.clone())
         } else {
@@ -171,8 +326,13 @@ impl<T: Ord + Clone, A: Array<Item = T>> TotalVecSet<A> {
     }
 }
 
-impl<T: Ord + Clone, A: Array<Item = T>> BitAnd for &TotalVecSet<A> {
-    type Output = TotalVecSet<A>;
+impl<'a, I: MutableSet + 'a> BitAnd for &'a TotalSet<I>
+where
+    &'a I: BitAnd<Output = I>,
+    &'a I: BitOr<Output = I>,
+    &'a I: Sub<Output = I>,
+{
+    type Output = TotalSet<I>;
     fn bitand(self, that: Self) -> Self::Output {
         match (self.negated, that.negated) {
             // intersection of elements
@@ -187,7 +347,12 @@ impl<T: Ord + Clone, A: Array<Item = T>> BitAnd for &TotalVecSet<A> {
     }
 }
 
-impl<T: Ord, A: Array<Item = T>> BitAndAssign for TotalVecSet<A> {
+impl<I: MutableSet> BitAndAssign for TotalSet<I>
+where
+    I: BitAndAssign,
+    I: BitOrAssign,
+    I: SubAssign,
+{
     fn bitand_assign(&mut self, that: Self) {
         match (self.negated, that.negated) {
             // intersection of elements
@@ -216,8 +381,13 @@ impl<T: Ord, A: Array<Item = T>> BitAndAssign for TotalVecSet<A> {
     }
 }
 
-impl<T: Ord + Clone, A: Array<Item = T>> BitOr for &TotalVecSet<A> {
-    type Output = TotalVecSet<A>;
+impl<'a, I: MutableSet> BitOr for &'a TotalSet<I>
+where
+    &'a I: BitAnd<Output = I>,
+    &'a I: BitOr<Output = I>,
+    &'a I: Sub<Output = I>,
+{
+    type Output = TotalSet<I>;
     fn bitor(self, that: Self) -> Self::Output {
         match (self.negated, that.negated) {
             // union of elements
@@ -232,7 +402,12 @@ impl<T: Ord + Clone, A: Array<Item = T>> BitOr for &TotalVecSet<A> {
     }
 }
 
-impl<T: Ord, A: Array<Item = T>> BitOrAssign for TotalVecSet<A> {
+impl<I: MutableSet> BitOrAssign for TotalSet<I>
+where
+    I: BitAndAssign,
+    I: BitOrAssign,
+    I: SubAssign,
+{
     fn bitor_assign(&mut self, that: Self) {
         match (self.negated, that.negated) {
             // union of elements
@@ -261,14 +436,20 @@ impl<T: Ord, A: Array<Item = T>> BitOrAssign for TotalVecSet<A> {
     }
 }
 
-impl<T: Ord + Clone, A: Array<Item = T>> BitXor for &TotalVecSet<A> {
-    type Output = TotalVecSet<A>;
+impl<'a, I: MutableSet> BitXor for &'a TotalSet<I>
+where
+    &'a I: BitXor<Output = I>,
+{
+    type Output = TotalSet<I>;
     fn bitxor(self, that: Self) -> Self::Output {
         Self::Output::new(&self.elements ^ &that.elements, self.negated ^ that.negated)
     }
 }
 
-impl<T: Ord, A: Array<Item = T>> BitXorAssign for TotalVecSet<A> {
+impl<I: MutableSet> BitXorAssign for TotalSet<I>
+where
+    I: BitXorAssign,
+{
     fn bitxor_assign(&mut self, that: Self) {
         self.elements ^= that.elements;
         self.negated ^= that.negated;
@@ -276,8 +457,13 @@ impl<T: Ord, A: Array<Item = T>> BitXorAssign for TotalVecSet<A> {
 }
 
 #[allow(clippy::suspicious_arithmetic_impl)]
-impl<T: Ord + Clone, A: Array<Item = T>> Sub for &TotalVecSet<A> {
-    type Output = TotalVecSet<A>;
+impl<'a, I: MutableSet> Sub for &'a TotalSet<I>
+where
+    &'a I: BitAnd<Output = I>,
+    &'a I: BitOr<Output = I>,
+    &'a I: Sub<Output = I>,
+{
+    type Output = TotalSet<I>;
     fn sub(self, that: Self) -> Self::Output {
         match (self.negated, that.negated) {
             // intersection of elements
@@ -292,7 +478,12 @@ impl<T: Ord + Clone, A: Array<Item = T>> Sub for &TotalVecSet<A> {
     }
 }
 
-impl<T: Ord, A: Array<Item = T>> SubAssign for TotalVecSet<A> {
+impl<I: MutableSet> SubAssign for TotalSet<I>
+where
+    I: BitAndAssign,
+    I: BitOrAssign,
+    I: SubAssign,
+{
     fn sub_assign(&mut self, that: Self) {
         match (self.negated, that.negated) {
             // intersection of elements
@@ -321,15 +512,15 @@ impl<T: Ord, A: Array<Item = T>> SubAssign for TotalVecSet<A> {
     }
 }
 
-impl<T: Ord + Clone, A: Array<Item = T>> Not for &TotalVecSet<A> {
-    type Output = TotalVecSet<A>;
+impl<'a, I: MutableSet + Clone> Not for &'a TotalSet<I> {
+    type Output = TotalSet<I>;
     fn not(self) -> Self::Output {
         Self::Output::new(self.elements.clone(), !self.negated)
     }
 }
 
-impl<T: Ord, A: Array<Item = T>> Not for TotalVecSet<A> {
-    type Output = TotalVecSet<A>;
+impl<I: MutableSet + Clone> Not for TotalSet<I> {
+    type Output = TotalSet<I>;
     fn not(self) -> Self::Output {
         Self::Output::new(self.elements, !self.negated)
     }
@@ -340,17 +531,17 @@ mod tests {
     #[allow(dead_code)]
     use super::*;
     use quickcheck::*;
-    use std::collections::BTreeSet;
     use quickcheck_macros::quickcheck;
+    use std::collections::BTreeSet;
 
-    type Test = TotalVecSet<[i64; 2]>;
+    type Test = TotalSet<VecSet<[i64; 2]>>;
 
-    impl<T: Arbitrary + Ord + Copy + Default + Debug> Arbitrary for TotalVecSet<[T; 2]> {
+    impl<T: Arbitrary + Ord + Copy + Default + Debug> Arbitrary for TotalSet<VecSet<[T; 2]>> {
         fn arbitrary<G: Gen>(g: &mut G) -> Self {
             let mut elements: Vec<T> = Arbitrary::arbitrary(g);
             elements.truncate(2);
             let negated: bool = Arbitrary::arbitrary(g);
-            TotalVecSet::new(elements.into(), negated)
+            TotalSet::new(elements.into(), negated)
         }
     }
 
